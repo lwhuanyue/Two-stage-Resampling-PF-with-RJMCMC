@@ -85,7 +85,208 @@ source(paste0(R_path, 'Func_RJ2S Non_para estimation proposal.R'))
 
 ```
 
-### 2. 
+### 2. Run the DA process
 
+Generating Spatiotemporal Field Data - 1D Advection Equation
+```
+out <- ode.1D(Cini, times, model2, para, method = "adams", names = c("C"), dimens = n) #The true states over time.
+image(out,xlab = 'times',ylab = 'positions')   # The figure of true states over time.
+```
+
+Generate the initial ensemble of state vectors and parameters. For the definition of the parameter space, please refer to Sections 2 and 4 of the associated paper.
+```
+N <- 80 # The size of ensemble
+# Generate the initial ensemble of particles of states and parameter --------
+Enstat <- matrix(NA, nrow = n, ncol = N)                   # The initial ensemble of particles of states
+for(i in 1:N){Enstat[,i] <- Cini*(1+rep(rnorm(1,0,0.1),n))}          
+
+EnPara <- matrix(NA, ncol = N, nrow = 2*kmax+2)            # The initial ensemble of particles of parameters
+EnPara[1,] <- sample(c(0:kmax),N,replace=TRUE,dpois(c(0:kmax), lambda = lambda_p)) # The index of model.
+for(i in 1:N){
+  kk <- EnPara[1,i]
+  if(kk>0){
+    c.x <- sample.locs(kk,L)
+    EnPara[1+(1:(kk)),i] <-   c.x}
+  c.v <- rgamma(kk+1,shape=g_alpha,rate=g_beta)
+  EnPara[kk+1+(1:(kk+1)),i] <- c.v  
+}
+
+```
+
+The ensemble of state vectors and parameters is updated sequentially with the acquisition of observations via the proposed method. 
+The observations are postulated to be the authentic spatiotemporal field data corrupted by additive Gaussian noise. 
+This DA process is encapsulated within the function `DA_process` in our codebase.
+
+```
+En.s.t_1 <- Enstat # Represents state vector from previous time step x_(t-1)
+En.s.t <- matrix(NA,nrow = n, ncol = N)   # Represents state vector at new time step x_t
+En.lik <- rep(NA,N)
+
+#Def for Bootstrap Resampling.
+Mid.En.s.t_1 <- En.s.t_1
+Mid.En.s.t   <- En.s.t
+Mid.En.lik   <- En.lik
+Mid.EnPara   <- EnPara
+Indice.m <- matrix(NA, ncol =length(t.obs)-1,nrow = kmax+1)
+Loca.m  <- matrix(NA, ncol =length(t.obs)-1,nrow = 2)
+index_k <- as.vector(table(factor(EnPara[1, ], levels = 0:3)))
+#Indice.m[,1] <- index_k
+#EnPara_2S <- EnPara
+# For easier index, the dim of observations is n, not m.
+for (i.t in 1:(length(t.obs)-1)){   # Loop of time. i.t=1 i.t=2
+  
+  t1 <- t.obs[i.t]; t2 <- t.obs[i.t+1]
+  sta.obs <- out[t2+1,-1] *(1+ sig.eps*rnorm(n))
+  #sta.obs <- out[t2+1,-1] + sig.eps*rnorm(n) #Perturbed observations.
+  if(0){
+    #i.t < length(t.obs)/2
+    #Later change *9 to *18
+    sig.eps <- (10-(i.t-1)/length(t.obs)*9)*sig.eps0}else{ 
+      sig.eps <- sig.eps0}
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+  #Loop_1:       Propagate          #
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+  
+  
+  
+  # In this step, propagate the state vector (En.s.t_1) to the new time (En.s.t)
+  for (i.n in 1:N){
+    k_0 <- EnPara[1,i.n]
+    para_0 <- EnPara[1:(2*k_0+2),i.n]; print(para_0)
+    if(k_0 == 0){
+      p4evo0 <- c(k_0,0,n,para_0[1+k_0+(1:(k_0+1))],0.0)
+    }else{
+      p4evo0 <- c(k_0,0,para_0[1+(1:(k_0))], n, para_0[1+k_0+(1:(k_0+1))],0.0)
+    }
+    # This is the original: p4evo0 <- c(k_0,0,para_0[2*(1:k_0)+1], n, para_0[2*(0:k_0)+2],0.0)
+    sta.ini <- En.s.t_1[,i.n]
+    sta.fore0 <- ode.1D(sta.ini, t1:t2, model2, p4evo0, method = "adams", 
+                        names = c("C"), dimens = n)[t2-t1+1,1:n+1]
+    lik0 <- lik.norm(sig.eps,sta.obs[Obs.site],sta.fore0[Obs.site])
+    En.lik[i.n] <- lik0
+    En.s.t[,i.n] <- sta.fore0
+  }
+  
+  if(plot_t){
+    plot(out[t2+1,-1],type='l',lwd = 3,ylab = paste('t=',t2))
+    points(Obs.site,sta.obs[Obs.site])
+    for(i.n in 1:N){lines(En.s.t[,i.n],col = 'red')}
+  } 
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+  #Loop_2:       Bootstrap          #
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+  
+  if(max(En.lik) != 0){
+    Fathers <- sample(c(1:N),N,En.lik,replace = TRUE)
+  }else{Fathers <- c(1:N)}
+  #Fathers <- c(1:N)
+  # Resampling replacement. Note: must use intermediate variables!!!!
+  # Only consider half
+  II2 <-  which(En.lik < median(En.lik)) 
+  for (i.n in II2) {
+    Mid.En.s.t_1[,i.n] <- En.s.t_1[,Fathers[i.n]]
+    Mid.En.s.t[,i.n]   <- En.s.t[,Fathers[i.n]]
+    Mid.En.lik[i.n]   <- En.lik[Fathers[i.n]]
+    Mid.EnPara[,i.n]   <- EnPara[,Fathers[i.n]]
+  }
+  Mid.En.s.t_1[,setdiff(c(1:N),II2)] <- En.s.t_1[,setdiff(c(1:N),II2)]
+  Mid.En.s.t[,setdiff(c(1:N),II2)]   <- En.s.t[,setdiff(c(1:N),II2)]
+  Mid.En.lik[setdiff(c(1:N),II2)]   <- En.lik[setdiff(c(1:N),II2)]
+  Mid.EnPara[,setdiff(c(1:N),II2)]   <- EnPara[,setdiff(c(1:N),II2)] 
+  #After replacement is complete, assign the matrices back
+  En.s.t_1 <- Mid.En.s.t_1
+  En.s.t   <- Mid.En.s.t
+  En.lik   <- Mid.En.lik
+  EnPara   <- Mid.EnPara
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+  #Loop_3:  RJMCMC Re-sampling      #
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+  
+  for (i.n in 1:N){   # Loop of ensemble member. i.n = 2
+    #Due to the first resampling step, repeat the input parameter step from the first step
+    for (gg in 1:G) {
+      k_0 <- EnPara[1,i.n]
+      para_0 <- EnPara[1:(2*k_0+2),i.n]; print(para_0)
+      if(k_0 == 0){
+        p4evo0 <- c(k_0,0,n,para_0[1+k_0+(1:(k_0+1))],0.0)
+      }else{
+        p4evo0 <- c(k_0,0,para_0[1+(1:(k_0))], n, para_0[1+k_0+(1:(k_0+1))],0.0)
+      }
+      #Next, propose new parameters
+      prpd.index <- Prop.Index(k_0,c=0.3,lambda=lambda_p,kmax=kmax)$index
+      propose1 <- Prp.Para(para_0,prpd.index) 
+      para_1 <- propose1$para; print(para_1) # Now need to define the function, propose a new function
+      k_1 <- para_1[1]
+      if(k_1 == 0){
+        p4evo1 <- c(k_1,0,n,para_1[1+k_1+(1:(k_1+1))],0.0)
+      }else{
+        p4evo1 <- c(k_1,0,para_1[1+(1:(k_1))], n, para_1[1+k_1+(1:(k_1+1))],0.0)
+      }
+      sta.ini <- En.s.t_1[,i.n]
+      sta.fore1 <- ode.1D(sta.ini, t1:t2, model2, p4evo1, method = "adams", 
+                          names = c("C"), dimens = n)[t2-t1+1,1:n+1]
+      
+      
+      
+      lik1 <- lik.norm(sig.eps,sta.obs[Obs.site],sta.fore1[Obs.site])
+      if(plot_t){lines(sta.fore1,col='blue')}
+      # Compare En.lik[i.n] and lik0
+      
+      #Note two points: one is the Jacobian, the other is not to mistake the initial vector
+      
+      #Then add if
+      
+      #~~~~~~~~~~~~~~~~End loop # ~~~~~~~~~~
+      
+      #Original unupdated part
+      lik0 <- lik.norm(sig.eps,sta.obs[Obs.site],sta.fore0[Obs.site])
+      lik1 <- lik.norm(sig.eps,sta.obs[Obs.site],sta.fore1[Obs.site])
+      if((lik1*propose1$ratio)>lik0*runif(1,0,1)){
+        EnPara[,i.n] <- rep(NA,2*kmax+2)
+        EnPara[1:(2*k_1+2),i.n] <- para_1
+        sta.fore0 <- sta.fore1
+      }
+    }
+    En.s.t[,i.n] <- sta.fore0
+    # K*(obs- perturbed forecast.)
+    if(kalmangain){En.s.t[,i.n] <- sta.fore0 + 
+      K.true %*% as.matrix(sta.obs[Obs.site] - sta.fore0[Obs.site] - sig.eps*rnorm(m))} 
+  }
+  # for (i.n in 1:N){while(max(Enstat[,i.n])> 10){
+  #     i.new <- sample(c(1:N),1)
+  #     Enstat[,i.n] <- Enstat[,i.new]
+  #     EnPara[,i.n] <- EnPara[,i.new]
+  #   }}
+  En.s.t_1 <- En.s.t
+  #indice
+  index_k <- as.vector(table(factor(EnPara[1, ], levels = 0:3)))
+  Indice.m[,i.t] <- index_k
+  # Count the number of elements in the interval [80,120]
+  count_75_125 <- sum(EnPara >= 75 & EnPara <= 125, na.rm = TRUE)
+  
+  # Count the number of elements in the interval [230,270]
+  count_225_275 <- sum(EnPara >= 225 & EnPara <= 275, na.rm = TRUE)
+  Loca.m[,i.t] <- c(min(count_75_125,N),min(count_225_275,N))
+  
+}
+
+tt <- 1+t.obs[i.t+1]
+m.true  <- out[tt,-1]
+mean.rj <- rowMeans(En.s.t_1)
+```
+
+<p align="center">
+  <img src="https://github.com/lwhuanyue/Two-stage-Resampling-PF-with-RJMCMC/blob/Images/Hist_21.png" width="45%" />
+  <img src="https://github.com/lwhuanyue/Two-stage-Resampling-PF-with-RJMCMC/blob/Images/Hist_23.png" width="45%" /> 
+</p>
+
+<p align="center">
+  <img src="https://github.com/lwhuanyue/Two-stage-Resampling-PF-with-RJMCMC/blob/Images/k_time.png" width="45%" />
+  <img src="https://github.com/lwhuanyue/Two-stage-Resampling-PF-with-RJMCMC/blob/Images/l_time.png" width="45%" /> 
+</p>
+
+<p align="center">
+  <img src="https://github.com/lwhuanyue/Two-stage-Resampling-PF-with-RJMCMC/blob/Images/Pre_velocities.png" width="45%" />
+</p>
 
 
