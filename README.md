@@ -86,3 +86,6 @@ source(paste0(R_path, 'Func_RJ2S Non_para estimation proposal.R'))
 ```
 
 ### 2. 
+
+
+
