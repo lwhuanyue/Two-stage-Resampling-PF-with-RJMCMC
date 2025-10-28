@@ -453,7 +453,7 @@ Enstat_3S  <- Enstat # Classical MCMC with 3 breakpoints, 4 steps               
 # Classical MCMC with 1 breakpoint                                                 #
 EnPara_1S <- matrix(NA, ncol = N, nrow = 2*kmax+2)
 EnPara_1S[1,] <- rep(1,N) 
-
+set.seed(1028) 
 for(i in 1:N){
   kk <- EnPara_1S[1,i]
   if(kk>0){
@@ -467,7 +467,7 @@ for(i in 1:N){
 #
 EnPara_2S <- matrix(NA, ncol = N, nrow = 2*kmax+2)
 EnPara_2S[1,] <- rep(2,N) 
-
+set.seed(1028) 
 for(i in 1:N){
   kk <- EnPara_2S[1,i]
   if(kk>0){
@@ -482,7 +482,7 @@ for(i in 1:N){
 #
 EnPara_3S <- matrix(NA, ncol = N, nrow = 2*kmax+2)
 EnPara_3S[1,] <- rep(3,N) 
-
+set.seed(1028) 
 for(i in 1:N){
   kk <- EnPara_3S[1,i]
   if(kk>0){
